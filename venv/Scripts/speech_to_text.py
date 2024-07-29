@@ -1,7 +1,9 @@
+import os
+import sys
+import logging
 from tkinter import *
 import pyttsx3
 import speech_recognition as sr
-import os
 import socket
 from fuzzywuzzy import fuzz
 import spotipy
@@ -10,10 +12,8 @@ import threading
 import pygame
 import configparser
 
-# Read configuration settings
-config = configparser.ConfigParser()
-config.read('config.ini')
-ACTIVATE_PHRASE = config.get('Settings', 'ActivatePhrase', fallback='Yo Spotify')
+# Set up logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Spotify API setup with cached token
 SPOTIPY_CLIENT_ID = '141ac1cdc293449f93c854636e1619e1'
@@ -29,14 +29,33 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=SPOTIPY_CLIENT_ID,
 microphone_active = False
 listening_thread = None
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+# Read configuration settings
+config = configparser.ConfigParser()
+config_path = resource_path('config.ini')
+config.read(config_path)
+ACTIVATE_PHRASE = config.get('Settings', 'ActivatePhrase', fallback='Yo Spotify')
+
 def listen_continuously():
     recognizer = sr.Recognizer()
     with sr.Microphone() as source:
         recognizer.adjust_for_ambient_noise(source)
+        logging.debug("Microphone adjusted for ambient noise")
         while microphone_active:
             try:
+                logging.debug("Listening for audio...")
                 audio = recognizer.listen(source, timeout=10, phrase_time_limit=5)
                 text = recognizer.recognize_google(audio)
+                logging.debug(f"Recognized: {text}")
                 update_text(f"Recognized: {text}")
 
                 # Check if the text starts with the activate phrase
@@ -44,18 +63,28 @@ def listen_continuously():
                 if fuzz.ratio(text.lower().strip(), ACTIVATE_PHRASE.lower()) > similarity_threshold:
                     update_text(f"Command received: {text}")
                     listen_for_command(recognizer, source)
+            except sr.WaitTimeoutError:
+                update_text("Listening timed out, no phrase detected.")
+                logging.warning("Listening timed out, no phrase detected.")
+            except sr.UnknownValueError:
+                update_text("Could not understand audio.")
+                logging.warning("Could not understand audio.")
             except sr.RequestError as e_request:
                 update_text(f"Could not request results; {e_request}")
+                logging.error(f"Could not request results; {e_request}")
             except Exception as ex:
-                print(f"An error occurred: {ex}")
+                update_text(f"An error occurred: {ex}")
+                logging.error(f"An error occurred: {ex}")
 
 def listen_for_command(recognizer, source):
+    logging.debug("Listening for command...")
     pygame.mixer.init()
-    pygame.mixer.music.load('Audio/listening.wav')
+    pygame.mixer.music.load(resource_path('Audio/listening.wav'))
     pygame.mixer.music.play()
     try:
         audio = recognizer.listen(source, timeout=15, phrase_time_limit=15)
         command = recognizer.recognize_google(audio).lower()
+        logging.debug(f"Command: {command}")
         update_text(f"Command: {command}")
 
         if 'play' in command:
@@ -77,18 +106,24 @@ def listen_for_command(recognizer, source):
             previous_track()
         else:
             update_text("Unknown command.")
+            logging.warning(f"Unknown command: {command}")
     except sr.WaitTimeoutError:
         update_text("Listening timed out, no command detected.")
+        logging.warning("Listening timed out, no command detected.")
     except sr.UnknownValueError:
         update_text("Could not understand command.")
+        logging.warning("Could not understand command.")
     except sr.RequestError as e_request:
         update_text(f"Could not request results; {e_request}")
+        logging.error(f"Could not request results; {e_request}")
     except Exception as ex:
         update_text(f"An error occurred while processing the command: {ex}")
+        logging.error(f"An error occurred while processing the command: {ex}")
 
 def play_music():
+    logging.debug("Attempting to play music...")
     pygame.mixer.init()
-    pygame.mixer.music.load('Audio/heard.wav')
+    pygame.mixer.music.load(resource_path('Audio/heard.wav'))
     pygame.mixer.music.play()
     try:
         devices = sp.devices()
@@ -97,39 +132,48 @@ def play_music():
             sp.transfer_playback(device_id, force_play=True)
         else:
             update_text("No active Spotify device found.")
+            logging.warning("No active Spotify device found.")
     except spotipy.exceptions.SpotifyException as e:
         update_text(f"Error: {e}")
+        logging.error(f"SpotifyException: {e}")
 
 def pause_music():
+    logging.debug("Attempting to pause music...")
     pygame.mixer.init()
-    pygame.mixer.music.load('Audio/heard.wav')
+    pygame.mixer.music.load(resource_path('Audio/heard.wav'))
     pygame.mixer.music.play()
     try:
         sp.pause_playback()
     except spotipy.exceptions.SpotifyException as e:
         update_text(f"Error: {e}")
+        logging.error(f"SpotifyException: {e}")
 
 def skip_track():
+    logging.debug("Attempting to skip track...")
     pygame.mixer.init()
-    pygame.mixer.music.load('Audio/heard.wav')
+    pygame.mixer.music.load(resource_path('Audio/heard.wav'))
     pygame.mixer.music.play()
     try:
         sp.next_track()
     except spotipy.exceptions.SpotifyException as e:
         update_text(f"Error: {e}")
+        logging.error(f"SpotifyException: {e}")
 
 def previous_track():
+    logging.debug("Attempting to go to previous track...")
     pygame.mixer.init()
-    pygame.mixer.music.load('Audio/heard.wav')
+    pygame.mixer.music.load(resource_path('Audio/heard.wav'))
     pygame.mixer.music.play()
     try:
         sp.previous_track()
     except spotipy.exceptions.SpotifyException as e:
         update_text(f"Error: {e}")
+        logging.error(f"SpotifyException: {e}")
 
 def play_playlist(playlist_name):
+    logging.debug(f"Attempting to play playlist: {playlist_name}")
     pygame.mixer.init()
-    pygame.mixer.music.load('Audio/heard.wav')
+    pygame.mixer.music.load(resource_path('Audio/heard.wav'))
     pygame.mixer.music.play()
     try:
         user_playlists = sp.current_user_playlists(limit=50)
@@ -151,10 +195,13 @@ def play_playlist(playlist_name):
                 update_text(f"Started playing public playlist: {playlists[0]['name']}")
             else:
                 update_text(f"No playlist found with name: {playlist_name}")
+                logging.warning(f"No playlist found with name: {playlist_name}")
     except spotipy.exceptions.SpotifyException as e:
         update_text(f"Error: {e}")
+        logging.error(f"SpotifyException: {e}")
 
 def update_text(message):
+    logging.info(message)
     t.after(0, e.insert, END, message + "\n")
     t.after(0, e.see, END)  # Scroll to the end
 
@@ -163,6 +210,7 @@ def start_listening():
     microphone_active = True
     activate_button.config(state=DISABLED)
     deactivate_button.config(state=NORMAL)
+    logging.debug("Starting listening thread...")
     listening_thread = threading.Thread(target=listen_continuously)
     listening_thread.daemon = True
     listening_thread.start()
@@ -172,10 +220,11 @@ def stop_listening():
     microphone_active = False
     activate_button.config(state=NORMAL)
     deactivate_button.config(state=DISABLED)
+    logging.debug("Stopped listening.")
 
 def write_text():
     if socket.gethostbyname(socket.gethostname()) == "127.0.0.1":
-        msg.showerror("App", "Your device is not connected to the internet")
+        update_text("Your device is not connected to the internet")
     else:
         e.delete(1.0, END)  # Clear the text box before starting
         start_listening()
